@@ -1,0 +1,1638 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Multifamily Deal Analyzer API",
+    "description": "A narrow underwriting API based on a multifamily acquisition workflow. It evaluates asking price, rent roll, expenses, debt terms, and projection assumptions and returns a GO / CONDITIONAL GO / NO-GO decision with metrics and generated text outputs. It can also ingest raw T12, rent roll, and tax receipt files.",
+    "version": "0.2.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyze-multifamily": {
+      "post": {
+        "summary": "Analyze Multifamily",
+        "operationId": "analyze_multifamily_v1_analyze_multifamily_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalyzeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyze-deal-package": {
+      "post": {
+        "summary": "Analyze Deal Package Endpoint",
+        "operationId": "analyze_deal_package_endpoint_v1_analyze_deal_package_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DealPackageRequest-Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealPackageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analyze-raw-files": {
+      "post": {
+        "summary": "Analyze Raw Files",
+        "operationId": "analyze_raw_files_v1_analyze_raw_files_post",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_raw_files_v1_analyze_raw_files_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawFileIngestionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeRequest": {
+        "properties": {
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "asking_price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Asking Price"
+          },
+          "unit_mix": {
+            "items": {
+              "$ref": "#/components/schemas/UnitTypeInput"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Unit Mix"
+          },
+          "vacancy_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vacancy Rate"
+          },
+          "expenses": {
+            "$ref": "#/components/schemas/OperatingExpensesInput"
+          },
+          "debt_terms": {
+            "$ref": "#/components/schemas/DebtTermsInput"
+          },
+          "misc_income": {
+            "$ref": "#/components/schemas/MiscIncomeInput"
+          },
+          "deferred_maintenance": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Deferred Maintenance",
+            "default": 0
+          },
+          "market_data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketDataInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "annual_growth_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.25,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Growth Rate"
+          },
+          "exit_cap_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.25,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Cap Rate"
+          },
+          "acquisition_fee_pct": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.1,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Fee Pct",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "asking_price",
+          "unit_mix"
+        ],
+        "title": "AnalyzeRequest"
+      },
+      "AnalyzeResponse": {
+        "properties": {
+          "property_name": {
+            "type": "string",
+            "title": "Property Name"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "GO",
+              "CONDITIONAL GO",
+              "NO-GO"
+            ],
+            "title": "Decision"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/Metrics"
+          },
+          "assumptions_used": {
+            "items": {
+              "$ref": "#/components/schemas/AssumptionItem"
+            },
+            "type": "array",
+            "title": "Assumptions Used"
+          },
+          "red_flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Red Flags"
+          },
+          "market_summary": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Market Summary"
+          },
+          "ten_year_projection": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectionYear"
+            },
+            "type": "array",
+            "title": "Ten Year Projection"
+          },
+          "generated_documents": {
+            "$ref": "#/components/schemas/GeneratedDocs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "property_name",
+          "decision",
+          "headline",
+          "metrics",
+          "assumptions_used",
+          "red_flags",
+          "market_summary",
+          "ten_year_projection",
+          "generated_documents"
+        ],
+        "title": "AnalyzeResponse"
+      },
+      "AssumableLoanInput": {
+        "properties": {
+          "current_balance": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Balance"
+          },
+          "interest_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interest Rate"
+          },
+          "amortization_years_remaining": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amortization Years Remaining"
+          },
+          "maturity_year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maturity Year"
+          }
+        },
+        "type": "object",
+        "title": "AssumableLoanInput"
+      },
+      "AssumptionItem": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "impact": {
+            "type": "string",
+            "title": "Impact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "value",
+          "reason",
+          "impact"
+        ],
+        "title": "AssumptionItem"
+      },
+      "Body_analyze_raw_files_v1_analyze_raw_files_post": {
+        "properties": {
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "asking_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asking Price"
+          },
+          "broker_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Text"
+          },
+          "t12_file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T12 File"
+          },
+          "rent_roll_file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "binary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rent Roll File"
+          },
+          "tax_receipt_files": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Tax Receipt Files",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "Body_analyze_raw_files_v1_analyze_raw_files_post"
+      },
+      "BrokerSummaryInput": {
+        "properties": {
+          "purchase_price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Purchase Price"
+          },
+          "assumable_loan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssumableLoanInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "highlights": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Highlights"
+          }
+        },
+        "type": "object",
+        "required": [
+          "purchase_price"
+        ],
+        "title": "BrokerSummaryInput"
+      },
+      "DealPackageRequest-Input": {
+        "properties": {
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "broker_summary": {
+            "$ref": "#/components/schemas/BrokerSummaryInput"
+          },
+          "rent_roll_summary": {
+            "$ref": "#/components/schemas/RentRollSummaryInput"
+          },
+          "t12_summary": {
+            "$ref": "#/components/schemas/T12SummaryInput"
+          },
+          "tax_receipts": {
+            "items": {
+              "$ref": "#/components/schemas/TaxReceiptInput"
+            },
+            "type": "array",
+            "title": "Tax Receipts"
+          },
+          "insurance_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurance Annual"
+          },
+          "payroll_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payroll Annual"
+          },
+          "repairs_maintenance_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repairs Maintenance Annual"
+          },
+          "utilities_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utilities Annual"
+          },
+          "annual_growth_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.25,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Growth Rate"
+          },
+          "exit_cap_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.25,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Cap Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "broker_summary",
+          "rent_roll_summary",
+          "t12_summary"
+        ],
+        "title": "DealPackageRequest"
+      },
+      "DealPackageRequest-Output": {
+        "properties": {
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "broker_summary": {
+            "$ref": "#/components/schemas/BrokerSummaryInput"
+          },
+          "rent_roll_summary": {
+            "$ref": "#/components/schemas/RentRollSummaryInput"
+          },
+          "t12_summary": {
+            "$ref": "#/components/schemas/T12SummaryInput"
+          },
+          "tax_receipts": {
+            "items": {
+              "$ref": "#/components/schemas/TaxReceiptInput"
+            },
+            "type": "array",
+            "title": "Tax Receipts"
+          },
+          "insurance_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurance Annual"
+          },
+          "payroll_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payroll Annual"
+          },
+          "repairs_maintenance_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repairs Maintenance Annual"
+          },
+          "utilities_annual": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utilities Annual"
+          },
+          "annual_growth_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.25,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Growth Rate"
+          },
+          "exit_cap_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 0.25,
+                "minimum": 0.01
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Cap Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "broker_summary",
+          "rent_roll_summary",
+          "t12_summary"
+        ],
+        "title": "DealPackageRequest"
+      },
+      "DealPackageResponse": {
+        "properties": {
+          "normalized_request": {
+            "$ref": "#/components/schemas/AnalyzeRequest"
+          },
+          "extraction_notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extraction Notes"
+          },
+          "analysis": {
+            "$ref": "#/components/schemas/AnalyzeResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "normalized_request",
+          "extraction_notes",
+          "analysis"
+        ],
+        "title": "DealPackageResponse"
+      },
+      "DebtTermsInput": {
+        "properties": {
+          "down_payment_pct": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Down Payment Pct"
+          },
+          "interest_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interest Rate"
+          },
+          "amortization_years": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amortization Years"
+          }
+        },
+        "type": "object",
+        "title": "DebtTermsInput"
+      },
+      "GeneratedDocs": {
+        "properties": {
+          "loi_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loi Text"
+          },
+          "assumptions_seller_letter_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assumptions Seller Letter Text"
+          },
+          "investor_packet_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investor Packet Text"
+          }
+        },
+        "type": "object",
+        "title": "GeneratedDocs"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MarketDataInput": {
+        "properties": {
+          "zip_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip Code"
+          },
+          "crime_rating": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "moderate",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crime Rating"
+          },
+          "crime_source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crime Source Url"
+          },
+          "market_rent_source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Rent Source Url"
+          }
+        },
+        "type": "object",
+        "title": "MarketDataInput"
+      },
+      "Metrics": {
+        "properties": {
+          "total_units": {
+            "type": "integer",
+            "title": "Total Units"
+          },
+          "avg_in_place_rent": {
+            "type": "number",
+            "title": "Avg In Place Rent"
+          },
+          "gross_monthly_rent": {
+            "type": "number",
+            "title": "Gross Monthly Rent"
+          },
+          "gross_annual_rent": {
+            "type": "number",
+            "title": "Gross Annual Rent"
+          },
+          "other_income_annual": {
+            "type": "number",
+            "title": "Other Income Annual"
+          },
+          "gross_scheduled_income": {
+            "type": "number",
+            "title": "Gross Scheduled Income"
+          },
+          "vacancy_rate": {
+            "type": "number",
+            "title": "Vacancy Rate"
+          },
+          "vacancy_loss": {
+            "type": "number",
+            "title": "Vacancy Loss"
+          },
+          "effective_gross_income": {
+            "type": "number",
+            "title": "Effective Gross Income"
+          },
+          "operating_expenses": {
+            "type": "number",
+            "title": "Operating Expenses"
+          },
+          "expense_ratio": {
+            "type": "number",
+            "title": "Expense Ratio"
+          },
+          "noi": {
+            "type": "number",
+            "title": "Noi"
+          },
+          "cap_rate_on_ask": {
+            "type": "number",
+            "title": "Cap Rate On Ask"
+          },
+          "annual_debt_service": {
+            "type": "number",
+            "title": "Annual Debt Service"
+          },
+          "dscr": {
+            "type": "number",
+            "title": "Dscr"
+          },
+          "annual_cash_flow": {
+            "type": "number",
+            "title": "Annual Cash Flow"
+          },
+          "monthly_cash_flow": {
+            "type": "number",
+            "title": "Monthly Cash Flow"
+          },
+          "monthly_cash_flow_per_unit": {
+            "type": "number",
+            "title": "Monthly Cash Flow Per Unit"
+          },
+          "cash_on_cash_return": {
+            "type": "number",
+            "title": "Cash On Cash Return"
+          },
+          "one_percent_rule": {
+            "type": "boolean",
+            "title": "One Percent Rule"
+          },
+          "recommended_offer": {
+            "type": "number",
+            "title": "Recommended Offer"
+          },
+          "price_at_125_dscr": {
+            "type": "number",
+            "title": "Price At 125 Dscr"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_units",
+          "avg_in_place_rent",
+          "gross_monthly_rent",
+          "gross_annual_rent",
+          "other_income_annual",
+          "gross_scheduled_income",
+          "vacancy_rate",
+          "vacancy_loss",
+          "effective_gross_income",
+          "operating_expenses",
+          "expense_ratio",
+          "noi",
+          "cap_rate_on_ask",
+          "annual_debt_service",
+          "dscr",
+          "annual_cash_flow",
+          "monthly_cash_flow",
+          "monthly_cash_flow_per_unit",
+          "cash_on_cash_return",
+          "one_percent_rule",
+          "recommended_offer",
+          "price_at_125_dscr"
+        ],
+        "title": "Metrics"
+      },
+      "MiscIncomeInput": {
+        "properties": {
+          "other_income_annual": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Other Income Annual",
+            "default": 0
+          },
+          "pet_fees_annual": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Pet Fees Annual",
+            "default": 0
+          },
+          "rubs_income_annual": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Rubs Income Annual",
+            "default": 0
+          },
+          "concessions_annual": {
+            "type": "number",
+            "title": "Concessions Annual",
+            "default": 0
+          },
+          "bad_debt_annual": {
+            "type": "number",
+            "title": "Bad Debt Annual",
+            "default": 0
+          },
+          "loss_to_lease_annual": {
+            "type": "number",
+            "title": "Loss To Lease Annual",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "MiscIncomeInput"
+      },
+      "OperatingExpensesInput": {
+        "properties": {
+          "property_taxes": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Taxes"
+          },
+          "insurance": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Insurance"
+          },
+          "payroll": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payroll"
+          },
+          "repairs_maintenance": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repairs Maintenance"
+          },
+          "utilities": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utilities"
+          },
+          "landscaping": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Landscaping"
+          },
+          "pest_control": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pest Control"
+          },
+          "admin_legal_accounting": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Legal Accounting"
+          },
+          "advertising_marketing": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advertising Marketing"
+          },
+          "contract_services": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contract Services"
+          },
+          "security": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security"
+          },
+          "internet_other": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internet Other"
+          },
+          "management_fee_pct": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Management Fee Pct"
+          },
+          "capex_per_unit": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capex Per Unit"
+          }
+        },
+        "type": "object",
+        "title": "OperatingExpensesInput"
+      },
+      "ProjectionYear": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "gross_income": {
+            "type": "number",
+            "title": "Gross Income"
+          },
+          "operating_expenses": {
+            "type": "number",
+            "title": "Operating Expenses"
+          },
+          "noi": {
+            "type": "number",
+            "title": "Noi"
+          },
+          "annual_debt_service": {
+            "type": "number",
+            "title": "Annual Debt Service"
+          },
+          "annual_cash_flow": {
+            "type": "number",
+            "title": "Annual Cash Flow"
+          },
+          "estimated_property_value": {
+            "type": "number",
+            "title": "Estimated Property Value"
+          },
+          "estimated_equity": {
+            "type": "number",
+            "title": "Estimated Equity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "gross_income",
+          "operating_expenses",
+          "noi",
+          "annual_debt_service",
+          "annual_cash_flow",
+          "estimated_property_value",
+          "estimated_equity"
+        ],
+        "title": "ProjectionYear"
+      },
+      "RawFileIngestionResponse": {
+        "properties": {
+          "extracted_package": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DealPackageRequest-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "extraction_notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Extraction Notes"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalyzeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "extraction_notes",
+          "warnings"
+        ],
+        "title": "RawFileIngestionResponse"
+      },
+      "RentRollSummaryInput": {
+        "properties": {
+          "total_units": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Total Units"
+          },
+          "occupied_units": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occupied Units"
+          },
+          "monthly_base_rent": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Monthly Base Rent"
+          },
+          "monthly_pet_rent": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Monthly Pet Rent",
+            "default": 0
+          },
+          "monthly_utility_rent": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Monthly Utility Rent",
+            "default": 0
+          },
+          "monthly_other_income": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Monthly Other Income",
+            "default": 0
+          },
+          "unit_mix": {
+            "items": {
+              "$ref": "#/components/schemas/UnitTypeInput"
+            },
+            "type": "array",
+            "title": "Unit Mix"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_units",
+          "monthly_base_rent"
+        ],
+        "title": "RentRollSummaryInput"
+      },
+      "T12SummaryInput": {
+        "properties": {
+          "total_income_annual": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Income Annual"
+          },
+          "total_expenses_annual": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Expenses Annual"
+          },
+          "reported_noi_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Noi Annual"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_income_annual",
+          "total_expenses_annual"
+        ],
+        "title": "T12SummaryInput"
+      },
+      "TaxReceiptInput": {
+        "properties": {
+          "parcel_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parcel Number"
+          },
+          "annual_tax_amount": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Annual Tax Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "annual_tax_amount"
+        ],
+        "title": "TaxReceiptInput"
+      },
+      "UnitTypeInput": {
+        "properties": {
+          "bedrooms": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Bedrooms"
+          },
+          "bathrooms": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Bathrooms"
+          },
+          "units": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Units"
+          },
+          "avg_monthly_rent": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Avg Monthly Rent"
+          },
+          "market_monthly_rent": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Monthly Rent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bedrooms",
+          "bathrooms",
+          "units",
+          "avg_monthly_rent"
+        ],
+        "title": "UnitTypeInput"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
