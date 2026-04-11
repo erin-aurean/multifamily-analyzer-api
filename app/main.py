@@ -3,7 +3,7 @@ import os
 
 app = FastAPI()
 
-API_KEY = os.environ.get("API_KEY")
+API_KEY = "123456"
 
 @app.get("/")
 def root():
