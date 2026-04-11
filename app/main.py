@@ -13,13 +13,17 @@ def root():
 def health():
     return {"status": "ok"}
 
-def verify_key(x_api_key: str = Header(None)):
+@app.post("/analyze")
+def analyze(
+    data: dict,
+    x_api_key: str = Header(...)
+):
+    # FORCE CHECK
+    if not API_KEY:
+        raise HTTPException(status_code=500, detail="API key not set on server")
+
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
-
-@app.post("/analyze")
-def analyze(data: dict, x_api_key: str = Header(...)):
-    verify_key(x_api_key)
 
     price = data.get("price", 0)
     monthly_rent = data.get("monthly_rent", 0)
