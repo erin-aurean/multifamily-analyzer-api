@@ -18,7 +18,7 @@ def verify_key(x_api_key: str = Header(None)):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 @app.post("/analyze")
-def analyze(data: dict, x_api_key: str = Header(None)):
+def analyze(data: dict, x_api_key: str = Header(...)):
     verify_key(x_api_key)
 
     price = data.get("price", 0)
