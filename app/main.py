@@ -68,7 +68,6 @@ def find_value_in_row(row_values) -> Optional[float]:
         return None
     return max(numeric_values)
 
-
 def parse_t12(file_bytes: bytes, filename: str) -> dict:
     result = {
         "gross_annual_income": None,
@@ -83,30 +82,45 @@ def parse_t12(file_bytes: bytes, filename: str) -> dict:
 
     sheets = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs)
 
-    income_keywords = ["total income", "gross income", "rental income", "total revenue"]
-    expense_keywords = ["total expenses", "operating expenses", "total operating expenses"]
-    noi_keywords = ["net operating income", "noi"]
-
     for _, df in sheets.items():
         df = df.fillna("")
+
         for _, row in df.iterrows():
-            row_strings = [str(x).strip().lower() for x in row.tolist()]
-            joined = " | ".join(row_strings)
+            row_vals = [str(x).strip() for x in row.tolist()]
+            row_lower = [x.lower() for x in row_vals]
+            joined = " | ".join(row_lower)
 
-            if result["gross_annual_income"] is None and any(k in joined for k in income_keywords):
-                val = find_value_in_row(row.tolist())
-                if val:
-                    result["gross_annual_income"] = val
+            # Use the last non-empty numeric-looking value in the row
+            numeric_candidates = []
+            for v in row.tolist():
+                val = to_float(v, default=None)
+                if val is not None and val != 0:
+                    numeric_candidates.append(val)
+            row_value = numeric_candidates[-1] if numeric_candidates else None
 
-            if result["total_expenses"] is None and any(k in joined for k in expense_keywords):
-                val = find_value_in_row(row.tolist())
-                if val:
-                    result["total_expenses"] = val
+            if result["gross_annual_income"] is None and "total income" in joined:
+                if row_value is not None:
+                    result["gross_annual_income"] = row_value
 
-            if result["noi"] is None and any(k in joined for k in noi_keywords):
-                val = find_value_in_row(row.tolist())
-                if val:
-                    result["noi"] = val
+            if result["total_expenses"] is None and (
+                "total expense" in joined
+                or "total operating expense" in joined
+                or joined.strip() == "expense"
+            ):
+                if row_value is not None:
+                    result["total_expenses"] = row_value
+
+            if result["noi"] is None and (
+                "net operating income" in joined
+                or re.search(r"\bnoi\b", joined)
+            ):
+                if row_value is not None:
+                    result["noi"] = row_value
+
+        # fallback: if NOI is missing but income and expenses exist
+        if result["noi"] is None and result["gross_annual_income"] is not None and result["total_expenses"] is not None:
+            result["noi"] = result["gross_annual_income"] - result["total_expenses"]
+            result["notes"].append("NOI was derived from gross annual income minus total expenses.")
 
     if result["gross_annual_income"] is None:
         result["notes"].append("Could not confidently find gross annual income in T12.")
@@ -116,6 +130,7 @@ def parse_t12(file_bytes: bytes, filename: str) -> dict:
         result["notes"].append("Could not confidently find NOI in T12.")
 
     return result
+
 
 
 def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
@@ -128,75 +143,95 @@ def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
         "notes": []
     }
 
-    excel_kwargs = {"sheet_name": 0}
+    excel_kwargs = {"sheet_name": 0, "header": None}
     if filename.lower().endswith(".xls"):
         excel_kwargs["engine"] = "xlrd"
 
-    df = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs)
+    raw_df = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs).fillna("")
 
-    original_columns = list(df.columns)
-    df.columns = [normalize_header(c) for c in df.columns]
+    header_row_idx = None
+    for idx in range(len(raw_df)):
+        row_text = " | ".join([str(x).strip().lower() for x in raw_df.iloc[idx].tolist()])
+        if "unit" in row_text and "rent" in row_text:
+            header_row_idx = idx
+            break
 
-    if len(df.columns) == 0:
-        result["notes"].append("Rent roll has no readable columns.")
+    if header_row_idx is None:
+        result["notes"].append("Could not locate rent roll header row.")
         return result
 
+    headers = [normalize_header(x) for x in raw_df.iloc[header_row_idx].tolist()]
+    df = raw_df.iloc[header_row_idx + 1:].copy()
+    df.columns = headers
+    df = df.reset_index(drop=True)
+
+    # Drop fully empty rows
+    df = df[df.astype(str).apply(lambda row: "".join(row).strip() != "", axis=1)]
+
+    # Common columns from the Gillham file and similar rent rolls
     unit_col = None
     for c in df.columns:
         if c in ["unit", "unit_number", "unit_no", "apt", "apartment"]:
             unit_col = c
             break
 
-    status_col = None
-    for c in df.columns:
-        if c in ["status", "occupancy_status", "lease_status"]:
-            status_col = c
-            break
-
-    current_rent_col = None
+    rent_col = None
     for c in df.columns:
         if c in ["rent", "current_rent", "lease_rent", "contract_rent", "actual_rent", "base_rent"]:
-            current_rent_col = c
+            rent_col = c
             break
 
     pet_col = None
     for c in df.columns:
-        if "pet" in c and "rent" in c:
+        if "pet_rent" in c or (("pet" in c) and ("rent" in c)):
             pet_col = c
             break
 
     utility_col = None
     for c in df.columns:
-        if "utility" in c or "rubs" in c:
+        if "utility_rent" in c or "utility" in c or "rubs" in c:
             utility_col = c
             break
 
-    if unit_col:
-        df = df[df[unit_col].notna()]
-        df = df[df[unit_col].astype(str).str.strip() != ""]
-        result["unit_count"] = int(len(df))
-    else:
-        result["unit_count"] = int(len(df))
+    if unit_col is None:
+        result["notes"].append(f"Could not confidently find a unit column. Columns seen: {list(df.columns)}")
+        return result
 
-    if status_col:
-        occupied_mask = df[status_col].astype(str).str.lower().str.contains("occ|current|leased", regex=True, na=False)
-        result["occupied_units"] = int(occupied_mask.sum())
-    elif current_rent_col:
-        occupied_mask = df[current_rent_col].apply(lambda x: to_float(x, 0) > 0)
-        result["occupied_units"] = int(occupied_mask.sum())
+    # Separate totals row if present
+    total_row = None
+    total_mask = df[unit_col].astype(str).str.strip().str.lower().eq("total")
+    if total_mask.any():
+        total_row = df[total_mask].iloc[0]
+        df_units = df[~total_mask].copy()
     else:
+        df_units = df.copy()
+
+    # Keep only real unit rows
+    df_units = df_units[df_units[unit_col].astype(str).str.strip() != ""]
+
+    result["unit_count"] = int(len(df_units))
+
+    if rent_col:
+        if total_row is not None:
+            result["monthly_rent"] = to_float(total_row.get(rent_col), 0.0)
+        else:
+            result["monthly_rent"] = float(df_units[rent_col].apply(to_float).sum())
+        result["occupied_units"] = int((df_units[rent_col].apply(to_float) > 0).sum())
+    else:
+        result["notes"].append(f"Could not confidently find a current rent column. Columns seen: {list(df.columns)}")
         result["occupied_units"] = result["unit_count"]
 
-    if current_rent_col:
-        result["monthly_rent"] = float(df[current_rent_col].apply(to_float).sum())
-    else:
-        result["notes"].append(f"Could not confidently find a current rent column. Columns seen: {original_columns}")
-
     if pet_col:
-        result["pet_rent_monthly"] = float(df[pet_col].apply(to_float).sum())
+        if total_row is not None:
+            result["pet_rent_monthly"] = to_float(total_row.get(pet_col), 0.0)
+        else:
+            result["pet_rent_monthly"] = float(df_units[pet_col].apply(to_float).sum())
 
     if utility_col:
-        result["utility_income_monthly"] = float(df[utility_col].apply(to_float).sum())
+        if total_row is not None:
+            result["utility_income_monthly"] = to_float(total_row.get(utility_col), 0.0)
+        else:
+            result["utility_income_monthly"] = float(df_units[utility_col].apply(to_float).sum())
 
     return result
 
