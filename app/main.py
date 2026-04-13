@@ -403,7 +403,7 @@ async def analyze_files(
     purchase_price: float = Form(...),
     t12_file: Optional[UploadFile] = File(None),
     rent_roll_file: Optional[UploadFile] = File(None),
-    tax_receipts: List[UploadFile] = File(default=[]),
+    tax_receipts: Optional[str] = Form(None),
     insurance: Optional[float] = Form(None),
     repairs_maintenance: Optional[float] = Form(None),
     payroll: Optional[float] = Form(None),
