@@ -1,5 +1,12 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from math import pow
+from typing import Optional, List
+import io
+import os
+import re
+
+import pandas as pd
+from PyPDF2 import PdfReader
 
 app = FastAPI()
 
@@ -16,26 +23,208 @@ def monthly_payment(principal: float, annual_rate: float, amort_years: int) -> f
     return principal * (monthly_rate * pow(1 + monthly_rate, n)) / (pow(1 + monthly_rate, n) - 1)
 
 
-@app.get("/")
-def root():
-    return {"status": "running"}
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.post("/analyze")
-def analyze(
-    data: dict,
-    x_api_key: str = Header(...)
-):
+def verify_key(x_api_key: str):
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+
+def to_float(value, default=0.0):
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return default
+    text = text.replace("$", "").replace(",", "").replace("%", "")
+    try:
+        return float(text)
+    except Exception:
+        return default
+
+
+def normalize_header(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(text).strip().lower()).strip("_")
+
+
+def extract_currency_values(text: str) -> List[float]:
+    matches = re.findall(r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})|[0-9]+\.[0-9]{2})", text)
+    values = []
+    for m in matches:
+        try:
+            values.append(float(m.replace(",", "")))
+        except Exception:
+            pass
+    return values
+
+
+def find_value_in_row(row_values) -> Optional[float]:
+    numeric_values = []
+    for v in row_values:
+        val = to_float(v, default=None)
+        if val is not None and val != 0:
+            numeric_values.append(val)
+    if not numeric_values:
+        return None
+    return max(numeric_values)
+
+
+def parse_t12(file_bytes: bytes, filename: str) -> dict:
+    result = {
+        "gross_annual_income": None,
+        "total_expenses": None,
+        "noi": None,
+        "notes": []
+    }
+
+    excel_kwargs = {"sheet_name": None, "header": None}
+    if filename.lower().endswith(".xls"):
+        excel_kwargs["engine"] = "xlrd"
+
+    sheets = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs)
+
+    income_keywords = ["total income", "gross income", "rental income", "total revenue"]
+    expense_keywords = ["total expenses", "operating expenses", "total operating expenses"]
+    noi_keywords = ["net operating income", "noi"]
+
+    for _, df in sheets.items():
+        df = df.fillna("")
+        for _, row in df.iterrows():
+            row_strings = [str(x).strip().lower() for x in row.tolist()]
+            joined = " | ".join(row_strings)
+
+            if result["gross_annual_income"] is None and any(k in joined for k in income_keywords):
+                val = find_value_in_row(row.tolist())
+                if val:
+                    result["gross_annual_income"] = val
+
+            if result["total_expenses"] is None and any(k in joined for k in expense_keywords):
+                val = find_value_in_row(row.tolist())
+                if val:
+                    result["total_expenses"] = val
+
+            if result["noi"] is None and any(k in joined for k in noi_keywords):
+                val = find_value_in_row(row.tolist())
+                if val:
+                    result["noi"] = val
+
+    if result["gross_annual_income"] is None:
+        result["notes"].append("Could not confidently find gross annual income in T12.")
+    if result["total_expenses"] is None:
+        result["notes"].append("Could not confidently find total expenses in T12.")
+    if result["noi"] is None:
+        result["notes"].append("Could not confidently find NOI in T12.")
+
+    return result
+
+
+def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
+    result = {
+        "unit_count": None,
+        "occupied_units": None,
+        "monthly_rent": None,
+        "pet_rent_monthly": 0.0,
+        "utility_income_monthly": 0.0,
+        "notes": []
+    }
+
+    excel_kwargs = {"sheet_name": 0}
+    if filename.lower().endswith(".xls"):
+        excel_kwargs["engine"] = "xlrd"
+
+    df = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs)
+
+    original_columns = list(df.columns)
+    df.columns = [normalize_header(c) for c in df.columns]
+
+    if len(df.columns) == 0:
+        result["notes"].append("Rent roll has no readable columns.")
+        return result
+
+    unit_col = None
+    for c in df.columns:
+        if c in ["unit", "unit_number", "unit_no", "apt", "apartment"]:
+            unit_col = c
+            break
+
+    status_col = None
+    for c in df.columns:
+        if c in ["status", "occupancy_status", "lease_status"]:
+            status_col = c
+            break
+
+    current_rent_col = None
+    for c in df.columns:
+        if c in ["rent", "current_rent", "lease_rent", "contract_rent", "actual_rent", "base_rent"]:
+            current_rent_col = c
+            break
+
+    pet_col = None
+    for c in df.columns:
+        if "pet" in c and "rent" in c:
+            pet_col = c
+            break
+
+    utility_col = None
+    for c in df.columns:
+        if "utility" in c or "rubs" in c:
+            utility_col = c
+            break
+
+    if unit_col:
+        df = df[df[unit_col].notna()]
+        df = df[df[unit_col].astype(str).str.strip() != ""]
+        result["unit_count"] = int(len(df))
+    else:
+        result["unit_count"] = int(len(df))
+
+    if status_col:
+        occupied_mask = df[status_col].astype(str).str.lower().str.contains("occ|current|leased", regex=True, na=False)
+        result["occupied_units"] = int(occupied_mask.sum())
+    elif current_rent_col:
+        occupied_mask = df[current_rent_col].apply(lambda x: to_float(x, 0) > 0)
+        result["occupied_units"] = int(occupied_mask.sum())
+    else:
+        result["occupied_units"] = result["unit_count"]
+
+    if current_rent_col:
+        result["monthly_rent"] = float(df[current_rent_col].apply(to_float).sum())
+    else:
+        result["notes"].append(f"Could not confidently find a current rent column. Columns seen: {original_columns}")
+
+    if pet_col:
+        result["pet_rent_monthly"] = float(df[pet_col].apply(to_float).sum())
+
+    if utility_col:
+        result["utility_income_monthly"] = float(df[utility_col].apply(to_float).sum())
+
+    return result
+
+
+def parse_tax_receipt_pdf(file_bytes: bytes) -> dict:
+    result = {
+        "property_taxes": 0.0,
+        "notes": []
+    }
+
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        values = extract_currency_values(text)
+        if values:
+            result["property_taxes"] = max(values)
+        else:
+            result["notes"].append("No currency values found in tax receipt PDF.")
+    except Exception as e:
+        result["notes"].append(f"Could not parse tax receipt PDF: {str(e)}")
+
+    return result
+
+
+def run_strict_sop_analysis(data: dict) -> dict:
     assumptions_used = []
     red_flags = []
+    extraction_notes = data.get("extraction_notes", [])
 
     purchase_price = float(data.get("purchase_price", 0))
     unit_count = int(data.get("unit_count", 0))
@@ -187,5 +376,112 @@ def analyze(
         "one_percent_rule_pass": one_percent_rule_pass,
         "recommended_price_for_125_dcr": round(price_at_125_dcr, 2),
         "assumptions_used": assumptions_used,
-        "red_flags": red_flags
+        "red_flags": red_flags,
+        "extraction_notes": extraction_notes
     }
+
+
+@app.get("/")
+def root():
+    return {"status": "running"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/analyze")
+def analyze(data: dict, x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    return run_strict_sop_analysis(data)
+
+
+@app.post("/analyze-files")
+async def analyze_files(
+    x_api_key: str = Header(...),
+    purchase_price: float = Form(...),
+    t12_file: Optional[UploadFile] = File(None),
+    rent_roll_file: Optional[UploadFile] = File(None),
+    tax_receipts: Optional[List[UploadFile]] = File(None),
+    insurance: Optional[float] = Form(None),
+    repairs_maintenance: Optional[float] = Form(None),
+    payroll: Optional[float] = Form(None),
+    utilities: Optional[float] = Form(None),
+    landscaping: Optional[float] = Form(None),
+    pest_control: Optional[float] = Form(None),
+    admin_legal_accounting: Optional[float] = Form(None),
+    other_expenses: Optional[float] = Form(None),
+    vacancy_rate: Optional[float] = Form(None),
+    management_rate: Optional[float] = Form(None),
+    capex_per_door: Optional[float] = Form(None),
+    down_payment_pct: float = Form(0.25),
+    interest_rate: float = Form(0.065),
+    amort_years: int = Form(30),
+):
+    verify_key(x_api_key)
+
+    extracted = {
+        "purchase_price": purchase_price,
+        "unit_count": 0,
+        "gross_annual_income": 0.0,
+        "property_taxes": 0.0,
+        "insurance": insurance,
+        "repairs_maintenance": repairs_maintenance,
+        "payroll": payroll or 0.0,
+        "utilities": utilities or 0.0,
+        "landscaping": landscaping or 0.0,
+        "pest_control": pest_control or 0.0,
+        "admin_legal_accounting": admin_legal_accounting or 0.0,
+        "other_expenses": other_expenses or 0.0,
+        "vacancy_rate": vacancy_rate,
+        "management_rate": management_rate,
+        "capex_per_door": capex_per_door,
+        "down_payment_pct": down_payment_pct,
+        "interest_rate": interest_rate,
+        "amort_years": amort_years,
+        "extraction_notes": []
+    }
+
+    if t12_file is not None:
+        t12_bytes = await t12_file.read()
+        t12_data = parse_t12(t12_bytes, t12_file.filename or "")
+        extracted["extraction_notes"].extend([f"T12: {n}" for n in t12_data["notes"]])
+
+        if t12_data["gross_annual_income"] is not None:
+            extracted["gross_annual_income"] = t12_data["gross_annual_income"]
+
+    if rent_roll_file is not None:
+        rr_bytes = await rent_roll_file.read()
+        rr_data = parse_rent_roll(rr_bytes, rent_roll_file.filename or "")
+        extracted["extraction_notes"].extend([f"Rent Roll: {n}" for n in rr_data["notes"]])
+
+        if rr_data["unit_count"] is not None:
+            extracted["unit_count"] = rr_data["unit_count"]
+
+        if extracted["gross_annual_income"] == 0 and rr_data["monthly_rent"] is not None:
+            monthly_total = (
+                rr_data["monthly_rent"]
+                + rr_data.get("pet_rent_monthly", 0.0)
+                + rr_data.get("utility_income_monthly", 0.0)
+            )
+            extracted["gross_annual_income"] = monthly_total * 12
+            extracted["extraction_notes"].append("Gross annual income was derived from rent roll monthly rent x 12 because T12 income was unavailable.")
+
+    if tax_receipts:
+        total_taxes = 0.0
+        for receipt in tax_receipts:
+            pdf_bytes = await receipt.read()
+            tax_data = parse_tax_receipt_pdf(pdf_bytes)
+            total_taxes += tax_data["property_taxes"]
+            extracted["extraction_notes"].extend([f"Tax Receipt: {n}" for n in tax_data["notes"]])
+        if total_taxes > 0:
+            extracted["property_taxes"] = total_taxes
+
+    if extracted["unit_count"] <= 0:
+        raise HTTPException(status_code=400, detail="Could not determine unit_count from uploaded files.")
+
+    if extracted["gross_annual_income"] <= 0:
+        raise HTTPException(status_code=400, detail="Could not determine gross_annual_income from uploaded files.")
+
+    return run_strict_sop_analysis(extracted)
