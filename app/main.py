@@ -468,19 +468,7 @@ async def analyze_files(
             extracted["gross_annual_income"] = monthly_total * 12
             extracted["extraction_notes"].append("Gross annual income was derived from rent roll monthly rent x 12 because T12 income was unavailable.")
 
-  if tax_receipts:
-    total_taxes = 0.0
-    for receipt in tax_receipts:
-        if not hasattr(receipt, "read"):
-            continue  # skip invalid inputs (like empty strings from Swagger)
 
-        pdf_bytes = await receipt.read()
-        tax_data = parse_tax_receipt_pdf(pdf_bytes)
-        total_taxes += tax_data["property_taxes"]
-        extracted["extraction_notes"].extend([f"Tax Receipt: {n}" for n in tax_data["notes"]])
-
-    if total_taxes > 0:
-        extracted["property_taxes"] = total_taxes
 
     if extracted["unit_count"] <= 0:
         raise HTTPException(status_code=400, detail="Could not determine unit_count from uploaded files.")
