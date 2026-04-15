@@ -1,26 +1,13 @@
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
+from typing import Optional, Dict, Any
 from math import pow
-from typing import Optional, List
+import pandas as pd
 import io
-import os
 import re
 
-import pandas as pd
-from PyPDF2 import PdfReader
-
-app = FastAPI()
+app = FastAPI(title="Multifamily Analyzer API")
 
 API_KEY = "123456"
-
-
-def monthly_payment(principal: float, annual_rate: float, amort_years: int) -> float:
-    if principal <= 0:
-        return 0.0
-    monthly_rate = annual_rate / 12
-    n = amort_years * 12
-    if monthly_rate == 0:
-        return principal / n
-    return principal * (monthly_rate * pow(1 + monthly_rate, n)) / (pow(1 + monthly_rate, n) - 1)
 
 
 def verify_key(x_api_key: str):
@@ -36,7 +23,7 @@ def to_float(value, default=0.0):
     text = str(value).strip()
     if not text:
         return default
-    text = text.replace("$", "").replace(",", "").replace("%", "")
+    text = text.replace("$", "").replace(",", "").replace("%", "").strip()
     try:
         return float(text)
     except Exception:
@@ -47,40 +34,47 @@ def normalize_header(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(text).strip().lower()).strip("_")
 
 
-def extract_currency_values(text: str) -> List[float]:
-    matches = re.findall(r"\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})|[0-9]+\.[0-9]{2})", text)
-    values = []
-    for m in matches:
-        try:
-            values.append(float(m.replace(",", "")))
-        except Exception:
-            pass
-    return values
+def monthly_payment(principal: float, annual_rate: float, amort_years: int) -> float:
+    if principal <= 0:
+        return 0.0
+    monthly_rate = annual_rate / 12
+    n = amort_years * 12
+    if monthly_rate == 0:
+        return principal / n
+    return principal * (monthly_rate * pow(1 + monthly_rate, n)) / (pow(1 + monthly_rate, n) - 1)
 
 
-def find_value_in_row(row_values) -> Optional[float]:
-    numeric_values = []
-    for v in row_values:
-        val = to_float(v, default=None)
-        if val is not None and val != 0:
-            numeric_values.append(val)
-    if not numeric_values:
-        return None
-    return max(numeric_values)
+def detect_excel_engine(filename: str):
+    if filename.lower().endswith(".xls"):
+        return "xlrd"
+    return None
 
-def parse_t12(file_bytes: bytes, filename: str) -> dict:
+
+def parse_t12(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+    """
+    Goal:
+    - Find gross annual income
+    - Find total expenses
+    - Find NOI
+    Works best on Excel T12s where labels may appear several rows down.
+    """
     result = {
         "gross_annual_income": None,
         "total_expenses": None,
         "noi": None,
-        "notes": []
+        "notes": [],
     }
 
+    engine = detect_excel_engine(filename)
     excel_kwargs = {"sheet_name": None, "header": None}
-    if filename.lower().endswith(".xls"):
-        excel_kwargs["engine"] = "xlrd"
+    if engine:
+        excel_kwargs["engine"] = engine
 
-    sheets = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs)
+    try:
+        sheets = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs)
+    except Exception as e:
+        result["notes"].append(f"Could not open T12 file: {e}")
+        return result
 
     for _, df in sheets.items():
         df = df.fillna("")
@@ -90,22 +84,27 @@ def parse_t12(file_bytes: bytes, filename: str) -> dict:
             row_lower = [x.lower() for x in row_vals]
             joined = " | ".join(row_lower)
 
-            # Use the last non-empty numeric-looking value in the row
             numeric_candidates = []
             for v in row.tolist():
                 val = to_float(v, default=None)
                 if val is not None and val != 0:
                     numeric_candidates.append(val)
+
             row_value = numeric_candidates[-1] if numeric_candidates else None
 
-            if result["gross_annual_income"] is None and "total income" in joined:
+            if result["gross_annual_income"] is None and (
+                "total income" in joined
+                or "gross income" in joined
+                or "total revenue" in joined
+            ):
                 if row_value is not None:
                     result["gross_annual_income"] = row_value
 
             if result["total_expenses"] is None and (
                 "total expense" in joined
+                or "total expenses" in joined
                 or "total operating expense" in joined
-                or joined.strip() == "expense"
+                or "operating expenses" in joined
             ):
                 if row_value is not None:
                     result["total_expenses"] = row_value
@@ -117,10 +116,9 @@ def parse_t12(file_bytes: bytes, filename: str) -> dict:
                 if row_value is not None:
                     result["noi"] = row_value
 
-        # fallback: if NOI is missing but income and expenses exist
-        if result["noi"] is None and result["gross_annual_income"] is not None and result["total_expenses"] is not None:
-            result["noi"] = result["gross_annual_income"] - result["total_expenses"]
-            result["notes"].append("NOI was derived from gross annual income minus total expenses.")
+    if result["noi"] is None and result["gross_annual_income"] is not None and result["total_expenses"] is not None:
+        result["noi"] = result["gross_annual_income"] - result["total_expenses"]
+        result["notes"].append("NOI was derived from T12 income minus T12 expenses.")
 
     if result["gross_annual_income"] is None:
         result["notes"].append("Could not confidently find gross annual income in T12.")
@@ -132,22 +130,32 @@ def parse_t12(file_bytes: bytes, filename: str) -> dict:
     return result
 
 
-
-def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
+def parse_rent_roll(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+    """
+    Goal:
+    - Find unit count
+    - Find occupied units
+    - Find monthly rent
+    - Handle header row not being row 1
+    - Ignore total row in unit count
+    """
     result = {
         "unit_count": None,
         "occupied_units": None,
         "monthly_rent": None,
-        "pet_rent_monthly": 0.0,
-        "utility_income_monthly": 0.0,
-        "notes": []
+        "notes": [],
     }
 
+    engine = detect_excel_engine(filename)
     excel_kwargs = {"sheet_name": 0, "header": None}
-    if filename.lower().endswith(".xls"):
-        excel_kwargs["engine"] = "xlrd"
+    if engine:
+        excel_kwargs["engine"] = engine
 
-    raw_df = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs).fillna("")
+    try:
+        raw_df = pd.read_excel(io.BytesIO(file_bytes), **excel_kwargs).fillna("")
+    except Exception as e:
+        result["notes"].append(f"Could not open rent roll file: {e}")
+        return result
 
     header_row_idx = None
     for idx in range(len(raw_df)):
@@ -165,39 +173,25 @@ def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
     df.columns = headers
     df = df.reset_index(drop=True)
 
-    # Drop fully empty rows
     df = df[df.astype(str).apply(lambda row: "".join(row).strip() != "", axis=1)]
 
-    # Common columns from the Gillham file and similar rent rolls
     unit_col = None
+    rent_col = None
+
     for c in df.columns:
         if c in ["unit", "unit_number", "unit_no", "apt", "apartment"]:
             unit_col = c
             break
 
-    rent_col = None
     for c in df.columns:
         if c in ["rent", "current_rent", "lease_rent", "contract_rent", "actual_rent", "base_rent"]:
             rent_col = c
-            break
-
-    pet_col = None
-    for c in df.columns:
-        if "pet_rent" in c or (("pet" in c) and ("rent" in c)):
-            pet_col = c
-            break
-
-    utility_col = None
-    for c in df.columns:
-        if "utility_rent" in c or "utility" in c or "rubs" in c:
-            utility_col = c
             break
 
     if unit_col is None:
         result["notes"].append(f"Could not confidently find a unit column. Columns seen: {list(df.columns)}")
         return result
 
-    # Separate totals row if present
     total_row = None
     total_mask = df[unit_col].astype(str).str.strip().str.lower().eq("total")
     if total_mask.any():
@@ -206,9 +200,7 @@ def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
     else:
         df_units = df.copy()
 
-    # Keep only real unit rows
     df_units = df_units[df_units[unit_col].astype(str).str.strip() != ""]
-
     result["unit_count"] = int(len(df_units))
 
     if rent_col:
@@ -216,47 +208,16 @@ def parse_rent_roll(file_bytes: bytes, filename: str) -> dict:
             result["monthly_rent"] = to_float(total_row.get(rent_col), 0.0)
         else:
             result["monthly_rent"] = float(df_units[rent_col].apply(to_float).sum())
+
         result["occupied_units"] = int((df_units[rent_col].apply(to_float) > 0).sum())
     else:
-        result["notes"].append(f"Could not confidently find a current rent column. Columns seen: {list(df.columns)}")
+        result["notes"].append(f"Could not confidently find a rent column. Columns seen: {list(df.columns)}")
         result["occupied_units"] = result["unit_count"]
 
-    if pet_col:
-        if total_row is not None:
-            result["pet_rent_monthly"] = to_float(total_row.get(pet_col), 0.0)
-        else:
-            result["pet_rent_monthly"] = float(df_units[pet_col].apply(to_float).sum())
-
-    if utility_col:
-        if total_row is not None:
-            result["utility_income_monthly"] = to_float(total_row.get(utility_col), 0.0)
-        else:
-            result["utility_income_monthly"] = float(df_units[utility_col].apply(to_float).sum())
-
     return result
 
 
-def parse_tax_receipt_pdf(file_bytes: bytes) -> dict:
-    result = {
-        "property_taxes": 0.0,
-        "notes": []
-    }
-
-    try:
-        reader = PdfReader(io.BytesIO(file_bytes))
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        values = extract_currency_values(text)
-        if values:
-            result["property_taxes"] = max(values)
-        else:
-            result["notes"].append("No currency values found in tax receipt PDF.")
-    except Exception as e:
-        result["notes"].append(f"Could not parse tax receipt PDF: {str(e)}")
-
-    return result
-
-
-def run_strict_sop_analysis(data: dict) -> dict:
+def run_strict_sop_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
     assumptions_used = []
     red_flags = []
     extraction_notes = data.get("extraction_notes", [])
@@ -278,17 +239,14 @@ def run_strict_sop_analysis(data: dict) -> dict:
     else:
         vacancy_rate = float(vacancy_rate)
 
-    property_taxes = data.get("property_taxes")
-    if property_taxes is None:
-        property_taxes = 0.0
-        assumptions_used.append("Property taxes were not provided. Set to 0 temporarily; real analysis should use verified tax receipts.")
-    else:
-        property_taxes = float(property_taxes)
+    property_taxes = float(data.get("property_taxes", 0) or 0)
+    if property_taxes == 0:
+        assumptions_used.append("Property taxes not provided in this version. Set to 0 until tax parser is re-added.")
 
     insurance = data.get("insurance")
     if insurance is None:
         insurance = 0.0
-        assumptions_used.append("Insurance was not provided. Set to 0 temporarily; real analysis should use actual or quoted insurance.")
+        assumptions_used.append("Insurance not provided. Set to 0 temporarily.")
     else:
         insurance = float(insurance)
 
@@ -299,12 +257,12 @@ def run_strict_sop_analysis(data: dict) -> dict:
     else:
         repairs_maintenance = float(repairs_maintenance)
 
-    payroll = float(data.get("payroll", 0))
-    utilities = float(data.get("utilities", 0))
-    landscaping = float(data.get("landscaping", 0))
-    pest_control = float(data.get("pest_control", 0))
-    admin_legal_accounting = float(data.get("admin_legal_accounting", 0))
-    other_expenses = float(data.get("other_expenses", 0))
+    payroll = float(data.get("payroll", 0) or 0)
+    utilities = float(data.get("utilities", 0) or 0)
+    landscaping = float(data.get("landscaping", 0) or 0)
+    pest_control = float(data.get("pest_control", 0) or 0)
+    admin_legal_accounting = float(data.get("admin_legal_accounting", 0) or 0)
+    other_expenses = float(data.get("other_expenses", 0) or 0)
 
     management_rate = data.get("management_rate")
     if management_rate is None:
@@ -374,12 +332,13 @@ def run_strict_sop_analysis(data: dict) -> dict:
 
     if dcr < 1.25:
         red_flags.append("DCR below 1.25.")
+
     if cash_flow_per_unit_per_month < 100:
         red_flags.append("Cash flow below $100/unit/month target.")
 
     target_noi_for_125_dcr = annual_debt_service * 1.25
-
     expense_load_ratio = total_expenses / effective_gross_income if effective_gross_income else 0
+
     if expense_load_ratio >= 1:
         price_at_125_dcr = 0
     else:
@@ -412,7 +371,7 @@ def run_strict_sop_analysis(data: dict) -> dict:
         "recommended_price_for_125_dcr": round(price_at_125_dcr, 2),
         "assumptions_used": assumptions_used,
         "red_flags": red_flags,
-        "extraction_notes": extraction_notes
+        "extraction_notes": extraction_notes,
     }
 
 
@@ -427,7 +386,7 @@ def health():
 
 
 @app.post("/analyze")
-def analyze(data: dict, x_api_key: str = Header(...)):
+def analyze(data: Dict[str, Any], x_api_key: str = Header(...)):
     verify_key(x_api_key)
     return run_strict_sop_analysis(data)
 
@@ -438,7 +397,6 @@ async def analyze_files(
     purchase_price: float = Form(...),
     t12_file: Optional[UploadFile] = File(None),
     rent_roll_file: Optional[UploadFile] = File(None),
-    tax_receipts: Optional[str] = Form(None),
     insurance: Optional[float] = Form(None),
     repairs_maintenance: Optional[float] = Form(None),
     payroll: Optional[float] = Form(None),
@@ -475,7 +433,7 @@ async def analyze_files(
         "down_payment_pct": down_payment_pct,
         "interest_rate": interest_rate,
         "amort_years": amort_years,
-        "extraction_notes": []
+        "extraction_notes": [],
     }
 
     if t12_file is not None:
@@ -495,15 +453,10 @@ async def analyze_files(
             extracted["unit_count"] = rr_data["unit_count"]
 
         if extracted["gross_annual_income"] == 0 and rr_data["monthly_rent"] is not None:
-            monthly_total = (
-                rr_data["monthly_rent"]
-                + rr_data.get("pet_rent_monthly", 0.0)
-                + rr_data.get("utility_income_monthly", 0.0)
+            extracted["gross_annual_income"] = rr_data["monthly_rent"] * 12
+            extracted["extraction_notes"].append(
+                "Gross annual income was derived from rent roll monthly rent x 12 because T12 income was unavailable."
             )
-            extracted["gross_annual_income"] = monthly_total * 12
-            extracted["extraction_notes"].append("Gross annual income was derived from rent roll monthly rent x 12 because T12 income was unavailable.")
-
-
 
     if extracted["unit_count"] <= 0:
         raise HTTPException(status_code=400, detail="Could not determine unit_count from uploaded files.")
